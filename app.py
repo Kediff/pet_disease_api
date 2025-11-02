@@ -4,6 +4,7 @@ import tensorflow as tf
 import pickle
 import re
 from tensorflow.keras.preprocessing.sequence import pad_sequences
+from flask_cors import CORS
 
 # ======================================================
 # 🔹 Load model, tokenizer, and label encoder
