@@ -6,6 +6,10 @@ import re
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from flask_cors import CORS
 
+
+app = Flask(__name__)
+CORS(app)
+
 # ======================================================
 # 🔹 Load model, tokenizer, and label encoder
 # ======================================================
