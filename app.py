@@ -37,7 +37,7 @@ def clean_text(text):
 # ======================================================
 # 🔹 Flask app setup
 # ======================================================
-app = Flask(__name__)
+
 MAXLEN = 60  # must match what you used in training
 
 @app.route('/predict', methods=['POST'])
