@@ -5,7 +5,12 @@ import re
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from flask_cors import CORS
 import os
-import tensorflow as tf
+import logging
+
+# NOTE: tensorflow is imported lazily inside load_resources() because importing
+# it at module import time can use a lot of memory and cause some hosts to OOM
+# or crash during startup. Delaying the import until the model is needed makes
+# startup lighter and surfaces import/load errors in the request logs.
 
 app = Flask(__name__)
 CORS(app)
@@ -24,12 +29,42 @@ def load_resources():
     """Load model and supporting files only once."""
     global model, tokenizer, label_encoder
     if model is None:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        with open(TOKENIZER_PATH, "rb") as f:
-            tokenizer = pickle.load(f)
-        with open(ENCODER_PATH, "rb") as f:
-            label_encoder = pickle.load(f)
-        print("✅ Model and tokenizer loaded.")
+        # Lazy import tensorflow to avoid heavy imports at module import time
+        try:
+            import tensorflow as tf
+        except Exception as e:
+            logging.exception("Failed to import tensorflow")
+            raise
+
+        # Validate model and artifact files exist early with clear messages
+        if not os.path.exists(MODEL_PATH):
+            raise FileNotFoundError(f"Model file not found at {MODEL_PATH}")
+        if not os.path.exists(TOKENIZER_PATH):
+            raise FileNotFoundError(f"Tokenizer file not found at {TOKENIZER_PATH}")
+        if not os.path.exists(ENCODER_PATH):
+            raise FileNotFoundError(f"Encoder file not found at {ENCODER_PATH}")
+
+        try:
+            model = tf.keras.models.load_model(MODEL_PATH)
+        except Exception:
+            logging.exception("Error loading Keras model")
+            raise
+
+        try:
+            with open(TOKENIZER_PATH, "rb") as f:
+                tokenizer = pickle.load(f)
+        except Exception:
+            logging.exception("Error loading tokenizer")
+            raise
+
+        try:
+            with open(ENCODER_PATH, "rb") as f:
+                label_encoder = pickle.load(f)
+        except Exception:
+            logging.exception("Error loading label encoder")
+            raise
+
+        logging.info("✅ Model and tokenizer loaded.")
 
 
 def clean_text(text):
@@ -42,6 +77,7 @@ def clean_text(text):
 @app.route("/predict", methods=["POST"])
 def predict_disease():
     try:
+        logging.getLogger().setLevel(logging.INFO)
         load_resources()  # Load model only on first request
         data = request.get_json()
         symptoms_text = data.get("symptoms", "")
