@@ -46,6 +46,7 @@ def load_resources():
         if not os.path.exists(ENCODER_PATH):
             raise FileNotFoundError(f"Encoder file not found at {ENCODER_PATH}")
 
+        # Load model and other assets
         try:
             model = tf.keras.models.load_model(MODEL_PATH)
             with open(TOKENIZER_PATH, "rb") as f:
@@ -88,35 +89,27 @@ def predict_disease():
         seq = tokenizer.texts_to_sequences([cleaned])
         pad = pad_sequences(seq, maxlen=MAXLEN, padding="post", truncating="post")
 
-        # ======================================================
-        # 🔹 New Improved Multi-Label Prediction Logic
-        # ======================================================
-        pred_proba = model.predict(pad)[0]
+        # Predict
+        pred_proba = model.predict(pad)[0]  # probabilities for each class
 
-        # Get indices of all predictions above threshold (e.g., 0.3)
-        threshold = 0.3
-        above_thresh_indices = np.where(pred_proba >= threshold)[0]
+        # 🔹 Multi-label logic
+        threshold = 0.3  # adjust if needed (0.3–0.5 works best)
+        indices = np.where(pred_proba >= threshold)[0]
 
-        # Sort them by probability (descending)
-        sorted_indices = above_thresh_indices[np.argsort(pred_proba[above_thresh_indices])[::-1]]
+        if len(indices) == 0:
+            indices = [np.argmax(pred_proba)]  # fallback: top 1
 
-        # Decode their labels and probabilities
-        predictions = [
-            {"label": label_encoder.inverse_transform([i])[0], "confidence": float(pred_proba[i])}
-            for i in sorted_indices
+        pred_labels = label_encoder.inverse_transform(indices)
+        confidences = [round(float(pred_proba[i]), 3) for i in indices]
+
+        results = [
+            {"disease": label, "confidence": conf}
+            for label, conf in zip(pred_labels, confidences)
         ]
-
-        # Always include the top prediction, even if all are below threshold
-        if len(predictions) == 0:
-            top_index = int(np.argmax(pred_proba))
-            predictions = [{
-                "label": label_encoder.inverse_transform([top_index])[0],
-                "confidence": float(pred_proba[top_index])
-            }]
 
         return jsonify({
             "input": symptoms_text,
-            "predictions": predictions
+            "predictions": results
         })
 
     except Exception as e:
