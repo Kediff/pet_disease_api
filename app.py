@@ -102,9 +102,28 @@ def predict_disease():
         # Tokenize and pad all items in one batch for efficiency
         cleaned_items = [clean_text(it) for it in items]
         seqs = tokenizer.texts_to_sequences(cleaned_items)
+        # Debug logging to help diagnose empty-token problems
+        logging.info("Parsed items: %s", items)
+        logging.info("Cleaned items: %s", cleaned_items)
+        logging.info("Tokenized sequences lengths: %s", [len(s) for s in seqs])
+
+        # If tokenizer produced no tokens for all items, surface a helpful error
+        if all(len(s) == 0 for s in seqs):
+            msg = (
+                "Tokenizer produced empty sequences for all inputs. "
+                "This usually means the tokenizer vocabulary doesn't contain the input words "
+                "or the cleaning removed all characters. Check tokenizer and input."
+            )
+            logging.error(msg)
+            return jsonify({"error": msg}), 400
         pads = pad_sequences(seqs, maxlen=MAXLEN, padding="post", truncating="post")
 
         pred_probas = model.predict(pads)  # shape: (n_items, n_classes)
+        logging.info("Model output shape: %s", np.atleast_2d(pred_probas).shape)
+        try:
+            logging.info("Label encoder classes count: %d", len(label_encoder.classes_))
+        except Exception:
+            logging.exception("Could not read label_encoder.classes_")
 
         results = []
         # If model outputs shape (n, ) because of single-class weirdness, normalize
