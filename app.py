@@ -110,27 +110,51 @@ def predict_disease():
         # If model outputs shape (n, ) because of single-class weirdness, normalize
         pred_probas = np.atleast_2d(pred_probas)
 
-        # For each symptom, pick top class
+        # For each symptom, support multi-label outputs by thresholding.
+        # If no class crosses the threshold, fall back to top-1.
+        threshold = 0.3
         for i, proba in enumerate(pred_probas):
-            idx = int(np.argmax(proba))
-            conf = float(np.max(proba))
-            try:
-                label = label_encoder.inverse_transform([idx])[0]
-            except Exception:
-                logging.exception("Label encoder transform failed")
-                label = str(idx)
+            proba = np.asarray(proba)
+            # find indices over threshold
+            if proba.ndim == 1 and proba.size > 1:
+                indices = np.where(proba >= threshold)[0]
+                if len(indices) == 0:
+                    indices = [int(np.argmax(proba))]
 
-            results.append({
-                "symptom": items[i],
-                "disease": label,
-                "confidence": round(conf, 3),
-            })
+                try:
+                    labels = label_encoder.inverse_transform(indices)
+                except Exception:
+                    logging.exception("Label encoder transform failed")
+                    labels = [str(idx) for idx in indices]
+
+                confidences = [round(float(proba[idx]), 3) for idx in indices]
+                preds = [
+                    {"disease": lab, "confidence": conf}
+                    for lab, conf in zip(labels, confidences)
+                ]
+            else:
+                # fallback for unexpected shapes
+                idx = int(np.argmax(proba))
+                conf = float(np.max(proba))
+                try:
+                    lab = label_encoder.inverse_transform([idx])[0]
+                except Exception:
+                    logging.exception("Label encoder transform failed")
+                    lab = str(idx)
+                preds = [{"disease": lab, "confidence": round(conf, 3)}]
+
+            entry = {"symptom": items[i], "predictions": preds}
+            # keep single-item compatibility
+            if len(preds) == 1:
+                entry.update({"disease": preds[0]["disease"], "confidence": preds[0]["confidence"]})
+
+            results.append(entry)
 
         # If only one item, keep compatibility by returning single-prediction fields
         response = {
             "input": symptoms,
             "predictions": results,
-        }
+        }   
         if len(results) == 1:
             response.update({
                 "prediction": results[0]["disease"],
@@ -139,25 +163,7 @@ def predict_disease():
 
         return jsonify(response)
 
-        # 🔹 Multi-label logic
-        threshold = 0.3  # adjust if needed (0.3–0.5 works best)
-        indices = np.where(pred_proba >= threshold)[0]
-
-        if len(indices) == 0:
-            indices = [np.argmax(pred_proba)]  # fallback: top 1
-
-        pred_labels = label_encoder.inverse_transform(indices)
-        confidences = [round(float(pred_proba[i]), 3) for i in indices]
-
-        results = [
-            {"disease": label, "confidence": conf}
-            for label, conf in zip(pred_labels, confidences)
-        ]
-
-        return jsonify({
-            "input": symptoms,
-            "predictions": results
-        })
+        # end predict
 
     except Exception as e:
         logging.exception("Prediction error")
