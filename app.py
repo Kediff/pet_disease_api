@@ -75,28 +75,25 @@ def predict_disease():
     try:
         logging.getLogger().setLevel(logging.INFO)
         load_resources()  # Load model only on first request
-        data = request.get_json()
-        symptoms_text = data.get("symptoms", "")
-        if not symptoms_text:
+        data = request.get_json() or {}
+        symptoms = data.get("symptoms", "")
+        if not symptoms:
             return jsonify({"error": "No symptoms provided"}), 400
 
-        # 🧠 Smart fix for one-word inputs
-        if len(symptoms_text.split()) == 1:
-            symptoms_text = f"My pet has {symptoms_text}"
-
-        # Clean and tokenize
-        symptoms_text = data.get("symptoms", "")
-        if not symptoms_text:
-            return jsonify({"error": "No symptoms provided"}), 400
-
-        # Allow clients to send either a string or a list of symptom strings.
-        # If a string contains multiple symptoms separated by commas/semicolons/
-        # slashes/pipes/newlines or the word 'and', split into separate items
-        # and return one prediction per symptom.
-        if isinstance(symptoms_text, list):
-            items = [str(s).strip() for s in symptoms_text if str(s).strip()]
+        # Normalize input into a list of symptom strings (items).
+        # Accept either a list of strings or a single string that may contain
+        # multiple symptoms separated by common delimiters.
+        if isinstance(symptoms, list):
+            items = [str(s).strip() for s in symptoms if str(s).strip()]
         else:
-            parts = re.split(r",|;|/|\||\n|\r|\band\b", str(symptoms_text))
+            # Ensure we operate on a string for splitting and the one-word fix.
+            s = str(symptoms).strip()
+            # If the user provided a single word like "vomiting", add a short
+            # context to help the tokenizer — but only for single-word strings.
+            if len(s.split()) == 1:
+                s = f"My pet has {s}"
+
+            parts = re.split(r",|;|/|\||\n|\r|\band\b", s)
             items = [p.strip() for p in parts if p and p.strip()]
 
         if len(items) == 0:
@@ -131,7 +128,7 @@ def predict_disease():
 
         # If only one item, keep compatibility by returning single-prediction fields
         response = {
-            "input": symptoms_text,
+            "input": symptoms,
             "predictions": results,
         }
         if len(results) == 1:
@@ -158,7 +155,7 @@ def predict_disease():
         ]
 
         return jsonify({
-            "input": symptoms_text,
+            "input": symptoms,
             "predictions": results
         })
 
