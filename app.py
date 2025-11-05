@@ -85,12 +85,62 @@ def predict_disease():
             symptoms_text = f"My pet has {symptoms_text}"
 
         # Clean and tokenize
-        cleaned = clean_text(symptoms_text)
-        seq = tokenizer.texts_to_sequences([cleaned])
-        pad = pad_sequences(seq, maxlen=MAXLEN, padding="post", truncating="post")
+        symptoms_text = data.get("symptoms", "")
+        if not symptoms_text:
+            return jsonify({"error": "No symptoms provided"}), 400
 
-        # Predict
-        pred_proba = model.predict(pad)[0]  # probabilities for each class
+        # Allow clients to send either a string or a list of symptom strings.
+        # If a string contains multiple symptoms separated by commas/semicolons/
+        # slashes/pipes/newlines or the word 'and', split into separate items
+        # and return one prediction per symptom.
+        if isinstance(symptoms_text, list):
+            items = [str(s).strip() for s in symptoms_text if str(s).strip()]
+        else:
+            parts = re.split(r",|;|/|\||\n|\r|\band\b", str(symptoms_text))
+            items = [p.strip() for p in parts if p and p.strip()]
+
+        if len(items) == 0:
+            return jsonify({"error": "No valid symptoms parsed from input"}), 400
+
+        # Tokenize and pad all items in one batch for efficiency
+        cleaned_items = [clean_text(it) for it in items]
+        seqs = tokenizer.texts_to_sequences(cleaned_items)
+        pads = pad_sequences(seqs, maxlen=MAXLEN, padding="post", truncating="post")
+
+        pred_probas = model.predict(pads)  # shape: (n_items, n_classes)
+
+        results = []
+        # If model outputs shape (n, ) because of single-class weirdness, normalize
+        pred_probas = np.atleast_2d(pred_probas)
+
+        # For each symptom, pick top class
+        for i, proba in enumerate(pred_probas):
+            idx = int(np.argmax(proba))
+            conf = float(np.max(proba))
+            try:
+                label = label_encoder.inverse_transform([idx])[0]
+            except Exception:
+                logging.exception("Label encoder transform failed")
+                label = str(idx)
+
+            results.append({
+                "symptom": items[i],
+                "disease": label,
+                "confidence": round(conf, 3),
+            })
+
+        # If only one item, keep compatibility by returning single-prediction fields
+        response = {
+            "input": symptoms_text,
+            "predictions": results,
+        }
+        if len(results) == 1:
+            response.update({
+                "prediction": results[0]["disease"],
+                "confidence": results[0]["confidence"],
+            })
+
+        return jsonify(response)
 
         # 🔹 Multi-label logic
         threshold = 0.3  # adjust if needed (0.3–0.5 works best)
