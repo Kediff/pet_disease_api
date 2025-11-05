@@ -14,8 +14,8 @@ CORS(app)
 # 🔹 Model Paths
 # ======================================================
 MODEL_PATH = "model/pet_health_lstm_model_2.keras"
-TOKENIZER_PATH = "model/tokenizer (2).pkl"
-ENCODER_PATH = "model/label_encoder.pkl"
+TOKENIZER_PATH = "model/tokenizer (1).pkl"
+ENCODER_PATH = "model/label_encoder (1).pkl"
 
 # ======================================================
 # 🔹 Global Variables
