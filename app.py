@@ -100,7 +100,18 @@ def predict_disease():
             return jsonify({"error": "No valid symptoms parsed from input"}), 400
 
         # Tokenize and pad all items in one batch for efficiency
-        cleaned_items = [clean_text(it) for it in items]
+        # Apply the one-word context fix per item so single-word tokens
+        # (e.g. "vomiting") get the same context used when a user sends
+        # a single symptom. This prevents missing tokens when the
+        # tokenizer was trained on phrases like "my pet has vomiting".
+        processed_for_tokenizer = []
+        for it in items:
+            s_it = str(it).strip()
+            if len(s_it.split()) == 1:
+                s_it = f"My pet has {s_it}"
+            processed_for_tokenizer.append(s_it)
+
+        cleaned_items = [clean_text(it) for it in processed_for_tokenizer]
         seqs = tokenizer.texts_to_sequences(cleaned_items)
         # Debug logging to help diagnose empty-token problems
         logging.info("Parsed items: %s", items)
@@ -116,58 +127,83 @@ def predict_disease():
             )
             logging.error(msg)
             return jsonify({"error": msg}), 400
-        pads = pad_sequences(seqs, maxlen=MAXLEN, padding="post", truncating="post")
 
-        pred_probas = model.predict(pads)  # shape: (n_items, n_classes)
-        logging.info("Model output shape: %s", np.atleast_2d(pred_probas).shape)
-        try:
-            logging.info("Label encoder classes count: %d", len(label_encoder.classes_))
-        except Exception:
-            logging.exception("Could not read label_encoder.classes_")
+        # Separate items with empty sequences so we can still predict for
+        # tokenizable inputs and return an informative message for the others.
+        non_empty_indices = [i for i, s in enumerate(seqs) if len(s) > 0]
+        empty_indices = [i for i, s in enumerate(seqs) if len(s) == 0]
 
-        results = []
-        # If model outputs shape (n, ) because of single-class weirdness, normalize
-        pred_probas = np.atleast_2d(pred_probas)
+        results_by_index = {}
+        # Mark empty-token items with a helpful message
+        for i in empty_indices:
+            results_by_index[i] = {
+                "symptom": items[i],
+                "predictions": [],
+                "error": "Input could not be tokenized by the model tokenizer",
+            }
 
-        # For each symptom, support multi-label outputs by thresholding.
-        # If no class crosses the threshold, fall back to top-1.
-        threshold = 0.3
-        for i, proba in enumerate(pred_probas):
-            proba = np.asarray(proba)
-            # find indices over threshold
-            if proba.ndim == 1 and proba.size > 1:
-                indices = np.where(proba >= threshold)[0]
-                if len(indices) == 0:
-                    indices = [int(np.argmax(proba))]
+        # If there are tokenizable items, predict only for them
+        pred_probas = None
+        if len(non_empty_indices) > 0:
+            non_empty_seqs = [seqs[i] for i in non_empty_indices]
+            pads = pad_sequences(non_empty_seqs, maxlen=MAXLEN, padding="post", truncating="post")
+            # Run prediction for non-empty sequences
+            pred_probas = model.predict(pads)
+            logging.info("Model output shape (non-empty items): %s", np.atleast_2d(pred_probas).shape)
+            try:
+                logging.info("Label encoder classes count: %d", len(label_encoder.classes_))
+            except Exception:
+                logging.exception("Could not read label_encoder.classes_")
 
-                try:
-                    labels = label_encoder.inverse_transform(indices)
-                except Exception:
-                    logging.exception("Label encoder transform failed")
-                    labels = [str(idx) for idx in indices]
+            results = []
+            # If model outputs shape (n, ) because of single-class weirdness, normalize
+            pred_probas = np.atleast_2d(pred_probas)
 
-                confidences = [round(float(proba[idx]), 3) for idx in indices]
-                preds = [
-                    {"disease": lab, "confidence": conf}
-                    for lab, conf in zip(labels, confidences)
-                ]
-            else:
-                # fallback for unexpected shapes
-                idx = int(np.argmax(proba))
-                conf = float(np.max(proba))
-                try:
-                    lab = label_encoder.inverse_transform([idx])[0]
-                except Exception:
-                    logging.exception("Label encoder transform failed")
-                    lab = str(idx)
-                preds = [{"disease": lab, "confidence": round(conf, 3)}]
+            # For each predicted (non-empty) symptom, support multi-label outputs by thresholding.
+            # If no class crosses the threshold, fall back to top-1.
+            threshold = 0.3
+            for j, proba in enumerate(pred_probas):
+                proba = np.asarray(proba)
+                # find indices over threshold
+                if proba.ndim == 1 and proba.size > 1:
+                    indices = np.where(proba >= threshold)[0]
+                    if len(indices) == 0:
+                        indices = [int(np.argmax(proba))]
 
-            entry = {"symptom": items[i], "predictions": preds}
-            # keep single-item compatibility
-            if len(preds) == 1:
-                entry.update({"disease": preds[0]["disease"], "confidence": preds[0]["confidence"]})
+                    try:
+                        labels = label_encoder.inverse_transform(indices)
+                    except Exception:
+                        logging.exception("Label encoder transform failed")
+                        labels = [str(idx) for idx in indices]
 
-            results.append(entry)
+                    confidences = [round(float(proba[idx]), 3) for idx in indices]
+                    preds = [
+                        {"disease": lab, "confidence": conf}
+                        for lab, conf in zip(labels, confidences)
+                    ]
+                else:
+                    # fallback for unexpected shapes
+                    idx = int(np.argmax(proba))
+                    conf = float(np.max(proba))
+                    try:
+                        lab = label_encoder.inverse_transform([idx])[0]
+                    except Exception:
+                        logging.exception("Label encoder transform failed")
+                        lab = str(idx)
+                    preds = [{"disease": lab, "confidence": round(conf, 3)}]
+
+                # Map back to original index
+                orig_index = non_empty_indices[j]
+                entry = {"symptom": items[orig_index], "predictions": preds}
+                # keep single-item compatibility
+                if len(preds) == 1:
+                    entry.update({"disease": preds[0]["disease"], "confidence": preds[0]["confidence"]})
+
+                results_by_index[orig_index] = entry
+
+            # Build final results list in original order
+            for idx in range(len(items)):
+                results.append(results_by_index.get(idx, {"symptom": items[idx], "predictions": [], "error": "No prediction available"}))
 
         # If only one item, keep compatibility by returning single-prediction fields
         response = {
