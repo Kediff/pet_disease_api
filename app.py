@@ -79,9 +79,7 @@ def predict_disease():
         if not symptoms_text:
             return jsonify({"error": "No symptoms provided"}), 400
 
-        # 🧠 Smart fix for one-word inputs
-        if len(symptoms_text.split()) == 1:
-            symptoms_text = f"My pet has {symptoms_text}"
+       
 
         # Clean and tokenize
         cleaned = clean_text(symptoms_text)
