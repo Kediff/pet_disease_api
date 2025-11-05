@@ -13,7 +13,7 @@ CORS(app)
 # ======================================================
 # 🔹 Model Paths
 # ======================================================
-MODEL_PATH = "model/pethealth_bilstm_model.keras"
+MODEL_PATH = "model/pet_health_lstm_model_2.keras"
 TOKENIZER_PATH = "model/tokenizer (2).pkl"
 ENCODER_PATH = "model/label_encoder.pkl"
 
