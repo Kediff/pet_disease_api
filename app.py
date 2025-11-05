@@ -79,7 +79,9 @@ def predict_disease():
         if not symptoms_text:
             return jsonify({"error": "No symptoms provided"}), 400
 
-       
+        # 🧠 Smart fix for one-word inputs
+        if len(symptoms_text.split()) == 1:
+            symptoms_text = f"My pet has {symptoms_text}"
 
         # Clean and tokenize
         cleaned = clean_text(symptoms_text)
@@ -134,4 +136,3 @@ def home():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-
